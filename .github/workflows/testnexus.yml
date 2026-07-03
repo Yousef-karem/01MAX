@@ -24,6 +24,15 @@ jobs:
     timeout-minutes: 120
 
     steps:
+      # Docker Maven leaves root-owned target/ files; checkout fails without this.
+      - name: Fix Docker root-owned workspace files
+        run: |
+          for dir in "$GITHUB_WORKSPACE" "$RUNNER_WORKSPACE"; do
+            if [ -n "$dir" ] && [ -d "$dir" ]; then
+              sudo chown -R "$(id -un):$(id -gn)" "$dir" || true
+            fi
+          done
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -80,6 +89,10 @@ jobs:
             --mode method \
             --skip-if-no-java-changes \
             --docker-maven
+
+      - name: Fix workspace ownership after Docker Maven
+        if: always()
+        run: sudo chown -R "$(id -un):$(id -gn)" "$GITHUB_WORKSPACE" || true
 
       - name: Upload demo_out artifact
         if: always()
