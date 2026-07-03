@@ -1,0 +1,98 @@
+name: TestNexus Incremental
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "**/*.java"
+      - "pom.xml"
+      - "build.gradle"
+      - "build.gradle.kts"
+  pull_request:
+    paths:
+      - "**/*.java"
+      - "pom.xml"
+      - "build.gradle"
+      - "build.gradle.kts"
+
+jobs:
+  testnexus-incremental:
+    # Requires a registered self-hosted runner (Settings → Actions → Runners).
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 120
+
+    steps:
+      - name: Fix workspace permissions
+        run: |
+          WS="${{ github.workspace }}"
+          sudo chown -R "$USER:$USER" "$WS" 2>/dev/null || true
+          sudo rm -rf "$WS" 2>/dev/null || true
+          sudo mkdir -p "$WS"
+          sudo chown -R "$USER:$USER" "$WS"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout TestNexus tool
+        uses: actions/checkout@v4
+        with:
+          repository: Yousef-karem/Unit-test-demo
+          path: testnexus-tool
+
+      - name: Restore demo_out cache
+        uses: actions/cache@v4
+        with:
+          path: demo_out
+          key: testnexus-${{ github.repository }}-${{ github.ref_name }}-${{ hashFiles('pom.xml', 'build.gradle', 'build.gradle.kts') }}
+          restore-keys: |
+            testnexus-${{ github.repository }}-${{ github.ref_name }}-
+            testnexus-${{ github.repository }}-
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r testnexus-tool/requirements.txt
+
+      - name: Preflight (Docker, Ollama, analyzer JAR)
+        run: |
+          docker info >/dev/null
+          curl -sf http://127.0.0.1:11434/api/tags >/dev/null
+          test -f testnexus-tool/testnexus-analyzer-1.0.0.jar
+
+      - name: Start TestNexus dashboard
+        run: |
+          . .venv/bin/activate
+          cd testnexus-tool
+          nohup python -m dashboard.server --output-dir ../demo_out --port 8765 > /tmp/testnexus-dashboard.log 2>&1 &
+          echo "Dashboard: http://127.0.0.1:8765" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run TestNexus incremental pipeline
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          . .venv/bin/activate
+          python testnexus-tool/scripts/testnexus_ci.py \
+            --repo . \
+            --tool-script testnexus-tool/llm_coverage_demo.py \
+            --output-dir demo_out \
+            --mode method \
+            --skip-if-no-java-changes \
+            --docker-maven
+
+      - name: Upload demo_out artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnexus-demo-out
+          path: demo_out/**
+
+      - name: Reset workspace ownership
+        if: always()
+        run: sudo chown -R "$USER:$USER" "${{ github.workspace }}" 2>/dev/null || true
