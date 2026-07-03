@@ -24,11 +24,8 @@ jobs:
     steps:
       - name: Fix workspace permissions
         run: |
-          WS="${{ github.workspace }}"
-          sudo chown -R "$USER:$USER" "$WS" 2>/dev/null || true
-          sudo rm -rf "$WS" 2>/dev/null || true
-          sudo mkdir -p "$WS"
-          sudo chown -R "$USER:$USER" "$WS"
+          # Use $GITHUB_WORKSPACE (quoted) — paths with spaces break ${{ github.workspace }} in shell.
+          sudo chown -R "$USER:$USER" "$GITHUB_WORKSPACE" 2>/dev/null || true
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -95,4 +92,4 @@ jobs:
 
       - name: Reset workspace ownership
         if: always()
-        run: sudo chown -R "$USER:$USER" "${{ github.workspace }}" 2>/dev/null || true
+        run: sudo chown -R "$USER:$USER" "$GITHUB_WORKSPACE" 2>/dev/null || true
